@@ -1,0 +1,58 @@
+#runs forward and attacks.
+#written by pbsds
+#== psuedo code: ==
+#
+#	label start
+#	while ACT or MOV:
+#		if ACT:
+#			for i in targets:
+#				if i is enemy:
+#					attack(i)
+#					goto(start)
+#		if MOV:
+#			while solid in front:
+#				turn(right)
+#			move(1)
+#	end_turn()
+#	goto(start)
+
+
+TCN							target
+BRZ (walk)
+SET (0) {R02}
+
+TGT {R02}					target_loop
+TAN
+CPY {RES} {R01}
+TFF
+ORR {RES} {R01}
+BRZ (attack)
+
+ADD (1) {R02}				next_target
+CPY {RES} {R02}
+TCN
+SUB {R02} {RES}
+NEG {RES}
+NOT {RES}
+BRZ (target_loop)
+JUP (walk)
+
+ORR {ACT} {ACT}				attack
+BRZ (end_turn)#(walk)
+TGT (0)
+ATG
+JUP (target)
+
+ORR {MOV} {MOV}				walk
+BRZ (end_turn)
+OCC
+NOT {RES} {RES}
+BRZ (turn)
+MOV (1)
+JUP (target)
+
+TUR (R)						turn
+JUP (walk)
+
+ETR							end_turn
+JUP (target)
