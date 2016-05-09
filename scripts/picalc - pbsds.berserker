@@ -1,0 +1,77 @@
+#pbsds' pi calculator
+
+# #divide 14 / 3
+# SET (14) {u}
+# SET (3) {d}
+# CAL (div)
+# CPY {p} {out}
+# CPY {r} {out}
+
+# #multiply 5 with 3
+# SET (5) {m}
+# SET (3) {n}
+# CAL (mul)
+# CPY {p} {out}
+
+SET (52163) {u}
+SET (16604) {d}
+#SET (245850922) {u}
+#SET (78256779) {d}
+SET (10) {m}
+SET (1) {k}
+
+#SET (100) {c}
+SET (7) {c}
+CAL (div)					pi_loop
+CPY {p} {out}#print
+CPY {r} {n}
+CAL (mul)
+CPY {p} {u}
+SUB {c} (1)
+BRZ (end_turn1)
+CPY {RES} {c}
+JUP (pi_loop)
+
+#continued
+ORR {k} {k}					end_turn1
+BRZ (end_turn)
+SET (0) {k}
+SET (32679) {u}
+SET (5000) {d}
+SET (5) {c}
+JUP (pi_loop)
+
+
+#m*n=p
+SUR (mul) mul
+	CPY {m} {R01}
+	SET (0) {p}
+	
+	ADD {p} {n}				mloop
+	CPY {RES} {p}
+	SUB {R01} (1)
+	CPY {RES} {R01}
+	NOT {RES}
+	BRZ (mloop)
+SUE
+
+#u/d = p*d + r
+SUR (div) div
+	CPY {u} {R01}
+	SET (0) {p}
+	
+	SUB {R01} {d}			dloop
+	CPY {RES} {R02}
+	NEG {RES}
+	NOT {RES}
+	BRZ (dend)
+	ADD {p} (1)
+	CPY {RES} {p}
+	CPY {R02} {R01}
+	JUP (dloop)
+	
+	CPY {R01} {r}			dend
+SUE
+
+ETR							end_turn
+JUP (0)

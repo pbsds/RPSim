@@ -184,8 +184,8 @@ class Script():
 		subrutines = {}#id:instruction pos to SUR call declaring the subrutine
 		
 		for token in tokens:
-			instruction = [token[0]]
-			syntax = self.SYNTAX[token[0]][1:]
+			instruction = [token[0].upper()]
+			syntax = self.SYNTAX[token[0].upper()][1:]
 			
 			#parse operand types, converts symbols to value, converts registernames to indexes
 			for i, operand in enumerate(token[1:]):
@@ -195,7 +195,8 @@ class Script():
 					assert operand[-1] == ")"
 					
 					try:
-						value = int(value)
+						#value = int(value)
+						value = clamp(int(value), -199999, 199999)
 					except ValueError:
 						#print value, symbols
 						if value in symbols:
@@ -240,7 +241,7 @@ class Script():
 				else:#all match
 					break
 			else:
-				raise ParserSyntaxError, "The operands do not match %s's syntax: \"%s\"" % (token[0], " ".join(token))
+				raise ParserSyntaxError, "The operands do not match %s's syntax: \"%s\"" % (token[0].upper(), " ".join(token))
 			
 			instructions.append(instruction)
 			if instruction[0] == "SUR":
