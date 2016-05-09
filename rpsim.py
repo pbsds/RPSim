@@ -450,12 +450,16 @@ class Script():
 			return 1* (self.map.isSolid(x, y) or self.map.isEntity(x, y))
 		SYNTAX["OCC"] = (cmd_ForwardOccupied, "")
 		def cmd_ForwardInanimate(self):
+			if self.berserker.CONFUSED:
+				return int(random.random()+0.5)
 			x, y = self.berserker.dir2coord[self.berserker.dir]
 			x += self.berserker.x
 			y += self.berserker.y
 			return 1 - 1*self.map.isEntity(x, y)
 		SYNTAX["ANI"] = (cmd_ForwardInanimate, "")
 		def cmd_ForwardFriendFoe(self):
+			if self.berserker.CONFUSED:
+				return int(random.random()+0.5)
 			x, y = self.berserker.dir2coord[self.berserker.dir]
 			x += self.berserker.x
 			y += self.berserker.y
@@ -473,12 +477,16 @@ class Script():
 		def cmd_TargetInanimate(self):
 			if self.TargetIndex <> 0 and self.TargetIndex >= len(self.berserker.listTargets()):
 				raise ExecutionError, "instruction #%i: TAN target index higher than max. Index = (%i), #targets = %i" % (self.PROG.value, self.TargetIndex, len(self.berserker.listTargets()))
+			if self.berserker.CONFUSED:
+				return int(random.random()+0.5)
 			tx, ty = self.berserker.listTargets()[self.TargetIndex]
 			return 1 - 1 * self.map.isEntity(tx, ty)
 		SYNTAX["TAN"] = (cmd_TargetInanimate, "")
 		def cmd_TargetFriendFoe(self):
 			if self.TargetIndex <> 0 and self.TargetIndex >= len(self.berserker.listTargets()):
 				raise ExecutionError, "instruction #%i: TFF target index higher than max. Index = (%i), #targets = %i" % (self.PROG.value, self.TargetIndex, len(self.berserker.listTargets()))
+			if self.berserker.CONFUSED:
+				return int(random.random()+0.5)
 			tx, ty = self.berserker.listTargets()[self.TargetIndex]
 			return 1 * self.map.isFriendly(tx, ty)
 		SYNTAX["TFF"] = (cmd_TargetFriendFoe, "")
@@ -488,7 +496,7 @@ class Script():
 				raise ExecutionError, "instruction #%i: ABI encountered when out of ACT stat for turn" % self.PROG.value
 			self.SetRegister("ACT", act-1, force=True)
 			
-			pass
+			self.promptUser("\"%s\" done?" % nameStr)
 		SYNTAX["ABI"] = (cmd_Ability, "S")
 		def cmd_EndTurn(self):
 			raise ExecutionTurnEnd
@@ -671,6 +679,8 @@ class Berserker():
 		self.MOV = self.executor.MakeRegisterPropertyObject("MOV")
 		self.ACT = self.executor.MakeRegisterPropertyObject("ACT")
 		self.RANGE = self.executor.MakeRegisterPropertyObject("RANGE")
+		
+		self.CONFUSED = False
 	def load(self, data):#handles both source code and bytecode
 		for i in " \t\n\r{}()[]":
 			if i in data:
@@ -738,10 +748,12 @@ class Interface():
 	c_guiBG = (35, 35, 35)
 	c_guiField = ((28, 28, 28), (44, 44, 44), (20, 20, 20))#[0] == base, [1] == hover, [2] == selected
 	c_guiText = (192, 192, 192)
+	c_guiTextOutline = (25, 25, 25)
 	c_guiTextDamage = (255, 180, 80)
 	c_guiTextError = (255, 100, 150)
 	c_guiTextSuccess = (70, 220, 120)
 	c_prevPath = (255, 0, 0)
+	c_boardBG = None#used for white interface
 	def __init__(self, map, berserker):
 		self.damages = {}#[(x, y)] = int()
 		self.map = map
@@ -786,18 +798,19 @@ class Interface():
 			if self.g_labels[i] in ("MOV"): self.g_inputs[-1].value = "5"
 			if self.g_labels[i] in ("Action limit"): self.g_inputs[-1].value = "10000"
 		self.g_selected, self.g_hover = None, None
-		self.g_labels.extend(["Clear path", "Clear damage", "View targeting", "spis meg", "Print register changes", "Load from scripts", "Load from clipboard", "Simulate turn", "Clear damage on turn"])
+		self.g_labels.extend(["Confused", "Clear path", "Clear damage", "View targeting", "spis meg", "Print register changes", "Load from scripts", "Load from clipboard", "Simulate turn", "Clear damage on turn"])
 		self.g_buttons = [False for _ in xrange(len(self.g_labels) - len(self.g_inputs))]
 		self.g_buttonLabel = [self.pg_font.render("False", False, self.c_guiText),
 		                      self.pg_font.render("True" , False, self.c_guiText),
 		                      self.pg_font.render("Submit" , False, self.c_guiText)]
 		#render labels:
 		self.g_texts = map(lambda x: self.pg_font.render(x + ":", False, self.c_guiText), self.g_labels)
+		self.g_LRlabel = map(lambda x: self.pg_font.render(x, False, self.c_guiText), ["Left", "Right"])
 		
 		#button events:
-		self.g_buttons[ 0] = self.clearPath
-		self.g_buttons[ 1] = self.clearDamage
-		self.g_buttons[ 2] = self.showTargetPattern
+		self.g_buttons[ 1] = self.clearPath
+		self.g_buttons[ 2] = self.clearDamage
+		self.g_buttons[ 3] = self.showTargetPattern
 		self.g_buttons[-5] = self.printRegisterChanges
 		self.g_buttons[-4] = self.setCodeFromScripts
 		self.g_buttons[-3] = self.setCodeFromClipboard
@@ -846,7 +859,7 @@ class Interface():
 			
 			#flip
 			pygame.display.flip()
-	def stepGUI(self, events):
+	def stepGUI(self, events, mapOnly = False):
 		#get mouse:
 		mx, my = pygame.mouse.get_pos()
 		mclick = pygame.mouse.get_pressed()[0] == 1
@@ -861,42 +874,42 @@ class Interface():
 			self.prev_mclick2 = mclick2
 		
 		#step animations:
-		self.g_updates_y_offset -= self.g_updates_y_offset / 10
-		if self.g_updates and time.time() - self.g_updates[0][1] > 15:
-			del self.g_updates[0]
+		self.stepAnimations()
 		
-		#gui mouse hover and click:
-		#self.x_gui is x offset for gui
-		self.g_hover = None
-		if self.g_selected >= len(self.g_inputs):
-			self.g_selected = None
-		if self.x_gui + self.g_label_width <= mx < self.x_gui + self.g_label_width + self.g_input_width:
-			if mclick:
+		#gui controls:
+		if not mapOnly:
+			#gui mouse hover and click:
+			#self.x_gui is x offset for gui
+			self.g_hover = None
+			if self.g_selected >= len(self.g_inputs):
 				self.g_selected = None
-			for i in xrange(len(self.g_texts)):
-				if self.y_gui+26*i <= my < 24 + self.y_gui + 26*i:
-					self.g_hover = i
-					if mclick:
-						if i >= len(self.g_inputs):#button
-							j = i - len(self.g_inputs)
-							self.g_selected = i
-							if type(self.g_buttons[j]) is bool:
-								self.g_buttons[j] = not self.g_buttons[j]
-							else:
-								self.g_buttons[j]()
-							
-						else:#input field
-							self.g_selected = i
-					break
-			else:
-				self.g_hover = None
-		elif mclick:
-			self.g_selected = None
-		
-		#gui text input
-		if self.g_selected <> None and self.g_selected < len(self.g_inputs):
-			self.g_inputs[self.g_selected].update(events)
-		
+			if self.x_gui + self.g_label_width <= mx < self.x_gui + self.g_label_width + self.g_input_width:
+				if mclick:
+					self.g_selected = None
+				for i in xrange(len(self.g_texts)):
+					if self.y_gui+26*i <= my < 24 + self.y_gui + 26*i:
+						self.g_hover = i
+						if mclick:
+							if i >= len(self.g_inputs):#button
+								j = i - len(self.g_inputs)
+								self.g_selected = i
+								if type(self.g_buttons[j]) is bool:
+									self.g_buttons[j] = not self.g_buttons[j]
+								else:
+									self.g_buttons[j]()
+								
+							else:#input field
+								self.g_selected = i
+						break
+				else:
+					self.g_hover = None
+			elif mclick:
+				self.g_selected = None
+			
+			#gui text input
+			if self.g_selected <> None and self.g_selected < len(self.g_inputs):
+				self.g_inputs[self.g_selected].update(events)
+			
 		#do map controls:
 		w, h, s = self.map.width, self.map.height, self.c_squareSize#speedup
 		if 0 <= mx < s*w and 0 <= my <= s*h and (mclick or mclick2 or self.prev_mclick or self.prev_mclick2):
@@ -914,30 +927,45 @@ class Interface():
 			
 			if x <> self.berserker.x or y <> self.berserker.y:
 				self.map.set(x, y, i)
-	def draw(self, surface):
+	def stepAnimations(self):
+		self.g_updates_y_offset -= self.g_updates_y_offset / 10
+		if self.g_updates and time.time() - self.g_updates[0][1] > 15:
+			del self.g_updates[0]
+	def draw(self, surface, mapOnly=False):
 		s = self.c_squareSize#speedup
+		w, h = self.map.width, self.map.height
+		ww, wh = surface.get_width(), surface.get_height()
 		
 		#draw gui
-		for i, text in enumerate(self.g_texts):
-			c = 0
-			if i == self.g_selected:
-				c = 2
-			elif i == self.g_hover:
-				c = 1
+		if not mapOnly:
+			for i, text in enumerate(self.g_texts):
+				c = 0
+				if i == self.g_selected:
+					c = 2
+				elif i == self.g_hover:
+					c = 1
+				
+				surface.blit(text, (self.x_gui+self.g_label_width - text.get_width() - 5, i*26 + 3 + self.y_gui))
+				pygame.draw.rect(surface, self.c_guiField[c], (self.x_gui + self.g_label_width, i*26 + self.y_gui, self.g_input_width, 24))
+				if i < len(self.g_inputs):
+					self.g_inputs[i].draw(surface)
+				else:
+					c = 2
+					if type(self.g_buttons[i-len(self.g_inputs)]) is bool:
+						c = 1 * self.g_buttons[i-len(self.g_inputs)]
+					surface.blit(self.g_buttonLabel[c], (self.x_gui + self.g_label_width + self.g_input_width/2 - self.g_buttonLabel[c].get_width()/2, i*26+3 + self.y_gui))
 			
-			surface.blit(text, (self.x_gui+self.g_label_width - text.get_width() - 5, i*26 + 3 + self.y_gui))
-			pygame.draw.rect(surface, self.c_guiField[c], (self.x_gui + self.g_label_width, i*26 + self.y_gui, self.g_input_width, 24))
-			if i < len(self.g_inputs):
-				self.g_inputs[i].draw(surface)
-			else:
-				c = 2
-				if type(self.g_buttons[i-len(self.g_inputs)]) is bool:
-					c = 1 * self.g_buttons[i-len(self.g_inputs)]
-				surface.blit(self.g_buttonLabel[c], (self.x_gui + self.g_label_width + self.g_input_width/2 - self.g_buttonLabel[c].get_width()/2, i*26+3 + self.y_gui))
+			#colors:
+			for i, text in enumerate(self.g_LRlabel):
+				surface.blit(text, (w*s + 100 + 200*i - text.get_width()/2, wh - 60))
+			
+			
 		
 		#draw board:
-		for x in xrange(self.map.width):
-			for y in xrange(self.map.height):
+		if self.c_boardBG:
+			pygame.draw.rect(surface, self.c_boardBG, (0, 0, w*s, h*s))
+		for x in xrange(w):
+			for y in xrange(h):
 				pygame.draw.rect(surface, self.c_palette[self.map.get(x, y)], (x*s, y*s, s-1, s-1))
 		
 		#draw berserker.prevPath:
@@ -953,29 +981,31 @@ class Interface():
 		for (x, y), (damage, text) in self.map.damages.iteritems():
 			if not text:
 				#text = self.pg_font.render(str(damage), False, self.c_guiText)
-				text = self.renderOutlined(str(damage), self.c_guiTextDamage, self.c_guiBG)
+				text = self.renderOutlined(str(damage), self.c_guiTextDamage)
 				self.map.damages[(x, y)][1] = text
 			
-			surface.blit(text, (x*s + s/2 - text.get_width()/2, y*s))
+			surface.blit(text, (x*s + s/2 - text.get_width()/2, y*s + s/2 - text.get_height()/2))
 		
 		#draw status updates:
 		if self.g_updates: 
 			th = self.g_updates[0][0].get_height()
-			oy = self.map.height*self.c_squareSize - th + int(self.g_updates_y_offset) - 8
+			oy = h*s - th + int(self.g_updates_y_offset) - 8
 			for i, (text, timestamp) in enumerate(self.g_updates[::-1]):
 				surface.blit(text, (8, oy - i*th))
 	#events:
 	def doTurn(self):
 		if self.pushFieldToBerserker():
 			self.clearPath()
-			if self.g_buttons[-1]:
+			if self.g_buttons[self.g_labels.index("Clear damage on turn") - len(self.g_inputs)]:
 				self.clearDamage()
+			
 			self.statusUpdate("Start simulating turn...", color = self.c_guiTextSuccess)
 			self.berserker.doTurn()
 			return True
 		return False
 	def printRegisterChanges(self):
-		register = self.promptListChoice([None] + [i[0] for i in self.berserker.executor.regnames if i[1]])
+		register = self.promptListChoice(["None "] + [i[0] for i in self.berserker.executor.regnames if i[1]])
+		if register == " None ": register = None
 		self.berserker.executor.PrintRegisterChanges(register, lambda x: self.statusUpdate("%s set to %i" % (register, x)))
 	def setCodeFromScripts(self):
 		script = self.promptListChoice(sorted(map(lambda x: os.path.basename(x)[:-10], glob.glob("scripts/*.berserker")), key=lambda x: x.lower()))
@@ -1019,42 +1049,37 @@ class Interface():
 		
 		self.g_updates_y_offset += float(self.g_updates[-1][0].get_height())
 	def errorCallback(self, text): self.statusUpdate(text, color=self.c_guiTextError)
+	#prompts:
 	def promptUser(self, prompt):#WIP
-		print "Interface prompt:\n\t",
-		return self.berserker.executor.promptUser(prompt)
-	#helpers:
+		gx = self.x_gui
+		g_prompt = self.pg_font.render(prompt, False, self.c_guiText)
+		g_choices = tuple(self.pg_font.render(str(i), False, self.c_guiText) for i in ("Yes", "No"))
+		
+		def prompt(window, mx, my, mclick):
+			window.blit(g_prompt, (gx + 5, 40))
+			for i in range(2):
+				c = 0
+				if gx + 5 <= mx < gx + 185 and 66+26*i <= my < 90+26*i:
+					c = 1 + 1*mclick
+					if mclick:
+						#time.sleep(0.2)
+						return i == 0
+					
+				pygame.draw.rect(window, self.c_guiField[c], (gx + 5, 66 + i*26, 180, 24))
+				window.blit(g_choices[i], (gx + 95 - g_choices[i].get_width()/2, 68 + 26*i))
+		
+		return self.promptBase(do=prompt, mapOnly=True)
 	def promptListChoice(self, alternatives):
 		choices = []
 		for i in alternatives:
-			choices.append((self.renderOutlined(str(i), width=1), i))
+			choices.append((self.pg_font.render(str(i), False, self.c_guiText), i))
 		
 		if choices:
-			window, clock = self.window, self.clock
 			w = max([i[0].get_width() for i in choices]) + 8
 			h = 25 * len(choices)
 			ox, oy = self.map.width*self.c_squareSize - w - 20, 10
-			self.prev_mclick = False
 			
-			while 1:
-				#events
-				events = pygame.event.get()
-				for event in events:
-					if event.type == pygame.QUIT:
-						return
-				
-				mx, my = pygame.mouse.get_pos()
-				mclick = pygame.mouse.get_pressed()[0] == 1
-				if mclick and self.prev_mclick:
-					mclick = False
-				else:
-					self.prev_mclick = mclick
-				
-				
-				#draw bg:
-				window.fill(self.c_guiBG)
-				self.draw(window)
-				
-				#step and draw list:
+			def promptList(window, mx, my, mclick):
 				pygame.draw.rect(window, self.c_guiBG, (ox, oy, w + 10, h + 10))#could be larger than window....
 				for i, (text, value) in enumerate(choices):
 					c = 0
@@ -1073,16 +1098,52 @@ class Interface():
 							return value
 					
 					pygame.draw.rect(window, self.c_guiField[c], (ox + 5, oy + i*25 + 5, w, 24))
-					#window.blit(text, (ox + 5+w/2 - text.get_width()/2, 5+i*25 + oy))
-					window.blit(text, (ox + 8, 5+i*25 + oy))
-				
-				
-				#fps
-				clock.tick(60)
-				
-				#flip
-				pygame.display.flip()
-	def renderOutlined(self, text, c1=c_guiText, c2=c_guiBG, width = 1):
+					window.blit(text, (ox + 8, 6+i*25 + oy))
+			
+			return self.promptBase(do=promptList)
+	def promptBase(self, do=None, mapOnly=False, doStep=False):
+		window, clock = self.window, self.clock
+		self.prev_mclick = False
+		
+		while 1:
+			#events
+			events = pygame.event.get()
+			for event in events:
+				if event.type == pygame.QUIT:
+					sys.exit()
+			
+			mx, my = pygame.mouse.get_pos()
+			mclick = pygame.mouse.get_pressed()[0] == 1
+			if mclick and self.prev_mclick:
+				mclick = False
+			else:
+				self.prev_mclick = mclick
+			
+			#step:
+			if doStep:
+				stepGUI(events, mapOnly = mapOnly)
+			else:
+				self.stepAnimations()
+			
+			#draw bg:
+			window.fill(self.c_guiBG)
+			self.draw(window, mapOnly = mapOnly)
+			
+			#step and draw list:
+			ech = do(window, mx, my, mclick)
+			if ech <> None:
+				return ech
+			
+			#fps
+			clock.tick(60)
+			
+			#flip
+			pygame.display.flip()
+	#helpers:
+	def renderOutlined(self, text, c1=None, c2=None, width = 1):
+		if not c1: c1 = self.c_guiText
+		if not c2: c2 = self.c_guiTextOutline
+		
 		t1 = self.pg_font.render(text, False, c1)
 		t2 = self.pg_font.render(text, False, c2)
 		ret = pygame.surface.Surface((t1.get_width()+width*2, t1.get_height()+width*2)).convert()
@@ -1111,6 +1172,8 @@ class Interface():
 			self.berserker.ACT.value = int(self.g_inputs[self.g_labels.index("ACT")].value)
 			self.berserker.RANGE.value = int(self.g_inputs[self.g_labels.index("RANGE")].value)
 			
+			
+			self.berserker.CONFUSED = self.g_buttons[self.g_labels.index("Confused") - len(self.g_inputs)]
 			self.berserker.executor.actionLimit = int(self.g_inputs[self.g_labels.index("Action limit")].value)
 		except ValueError:
 			self.errorCallback("Error: Invalid stats!")
@@ -1118,8 +1181,27 @@ class Interface():
 		
 		return True
 
+class InterfaceWhite(Interface):
+	c_palette = ((255, 215, 175),#0 - ground
+	             (0, 0, 0),#1 - wall
+	             (50, 120, 200),#2 - friendly
+	             (200, 40, 60),#3 - enemy
+	             (200, 130, 40))#4 - mine
+	c_palMax = len(c_palette)-1 -1#disables hazards
+	c_colorBerserker = (50, 200, 50)
+	c_guiBG = (210, 240, 255)
+	c_guiField = ((90, 210, 255), (170, 230, 255), (40, 200, 255))#[0] == base, [1] == hover, [2] == selected
+	c_guiText = (0, 0, 0)
+	c_guiTextOutline = (40, 40, 90)
+	c_guiTextDamage = (255, 180, 80)
+	c_guiTextError = (255, 100, 150)
+	c_guiTextSuccess = (70, 220, 120)
+	c_prevPath = (255, 0, 0)
+	c_boardBG = (80, 80, 120)
+
 def main(argv):#takes cli parameters backwards
 	size = 18#normal go board size
+	gui = Interface
 	
 	#handle parameters:
 	if argv:
@@ -1149,6 +1231,9 @@ def main(argv):#takes cli parameters backwards
 				print "\t-s, --size [number]"
 				print "\t\tSets the board  size to [number] x [number]"
 				
+				print "\t-w --white"
+				print "\t\tMakes the UI bright instead"
+				
 				sys.exit(0)
 			elif i in ("p", "parse"):
 				source = argv.pop()
@@ -1174,13 +1259,15 @@ def main(argv):#takes cli parameters backwards
 			elif i in ("s", "size"):
 				size = int(argv.pop())
 				assert size > 0
+			elif i in ("w", "white"):
+				gui = InterfaceWhite
 				
 		if close:
 			sys.exit(0)
 	
 	map = Map(size, size)
 	berserker = Berserker((size/2, size/2), map)
-	gui = Interface(map, berserker)
+	gui = gui(map, berserker)
 	gui.run()
 	
 if __name__ == "__main__":

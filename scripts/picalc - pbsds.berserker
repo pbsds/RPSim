@@ -17,10 +17,11 @@ SET (52163) {u}
 SET (16604) {d}
 #SET (245850922) {u}
 #SET (78256779) {d}
+#SET (16) {c}
 SET (10) {m}
 SET (1) {k}
 
-#SET (100) {c}
+
 SET (7) {c}
 CAL (div)					pi_loop
 CPY {p} {out}#print
